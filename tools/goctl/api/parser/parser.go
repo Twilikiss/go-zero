@@ -263,6 +263,7 @@ func (p parser) fillService() error {
 				Path:               astRoute.Route.Path.Text(),
 				Doc:                p.stringExprs(astRoute.Route.DocExpr),
 				Comment:            p.stringExprs([]ast.Expr{astRoute.Route.CommentExpr}),
+				AtDoc:              spec.AtDoc{Generation: "all"}, // 显式初始化
 			}
 			if astRoute.AtHandler != nil {
 				route.Handler = astRoute.AtHandler.Name.Text()
@@ -287,9 +288,30 @@ func (p parser) fillService() error {
 					properties[kv.Key.Text()] = kv.Value.Text()
 				}
 				route.AtDoc.Properties = properties
+
+				// 添加调试信息
+				//fmt.Printf("DEBUG: Route %s %s - AtDoc properties: %+v\n",
+				//	route.Method, route.Path, properties)
+
+				// 解析generation属性
+				if gen, exists := properties["generation"]; exists {
+					route.AtDoc.Generation = gen
+					//fmt.Printf("DEBUG: Route %s %s - Found generation: %s\n",
+					//	route.Method, route.Path, gen)
+				} else {
+					route.AtDoc.Generation = "all" // 默认值
+					//fmt.Printf("DEBUG: Route %s %s - No generation found, using default: all\n",
+					//	route.Method, route.Path)
+				}
+
 				if astRoute.AtDoc.LineDoc != nil {
 					route.AtDoc.Text = astRoute.AtDoc.LineDoc.Text()
 				}
+			} else {
+				// 当没有AtDoc时，也要设置默认值
+				route.AtDoc.Generation = "all"
+				//fmt.Printf("DEBUG: Route %s %s - No AtDoc, using default generation: all\n",
+				//	route.Method, route.Path)
 			}
 
 			err = p.fillRouteType(&route)

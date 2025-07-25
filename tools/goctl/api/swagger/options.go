@@ -113,7 +113,23 @@ func valueFromOptions(_ Context, options []string, key string, tp string) any {
 				val, _ := strconv.ParseFloat(s, 64)
 				return val
 			case swaggerTypeArray:
-				return s
+				// 修正：支持example传入对应的数组类型
+				// 尝试解析为数组案例：example=1|2，同时如果只有单个元素将被自动包装为数组
+				// 处理数组类型的example
+				return parseArrayExample(s)
+				// if strings.Contains(s,"|") {
+				// 	parts := strings.Split(s, "|")
+				// 	var result []string
+				// 	for _, part := range parts {
+				// 		trimmed := strings.TrimSpace(part)
+				// 		if len(trimmed) > 0 {
+				// 			result = append(result, trimmed)
+				// 		}
+				// 	}
+				// 	return result
+				// }
+				// // 如果没有用到管道错误就直接返回对应字符串
+				// return s
 			case swaggerTypeString:
 				return s
 			default:
@@ -122,4 +138,46 @@ func valueFromOptions(_ Context, options []string, key string, tp string) any {
 		}
 	}
 	return nil
+}
+
+func parseArrayExample(s string) any {
+	s = strings.TrimSpace(s)
+
+	// 情况1：使用管道符分隔的多个元素
+	if strings.Contains(s, "|") {
+		parts := strings.Split(s, "|")
+		var result []any
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if len(trimmed) > 0 {
+				result = append(result, parseValue(trimmed))
+			}
+		}
+		return result
+	}
+
+	// 情况2：单个值，直接包装为数组
+	return []any{parseValue(s)}
+}
+
+func parseValue(value string) any {
+	value = strings.TrimSpace(value)
+
+	// 尝试解析为整数
+	if intVal, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return intVal
+	}
+
+	// 尝试解析为浮点数
+	if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+		return floatVal
+	}
+
+	// 尝试解析为布尔值
+	if boolVal, err := strconv.ParseBool(value); err == nil {
+		return boolVal
+	}
+
+	// 默认作为字符串
+	return value
 }

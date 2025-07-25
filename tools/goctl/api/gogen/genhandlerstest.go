@@ -57,6 +57,11 @@ func genHandlerTest(dir, rootPkg string, cfg *config.Config, group spec.Group, r
 func genHandlersTest(dir, rootPkg string, cfg *config.Config, api *spec.ApiSpec) error {
 	for _, group := range api.Service.Groups {
 		for _, route := range group.Routes {
+			// 新增：过滤掉 generation 为 "swagger" 的路由
+			if route.AtDoc.Generation == "swagger" {
+				continue
+			}
+
 			if err := genHandlerTest(dir, rootPkg, cfg, group, route); err != nil {
 				return err
 			}

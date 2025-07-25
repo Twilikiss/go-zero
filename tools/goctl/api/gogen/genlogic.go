@@ -21,6 +21,12 @@ var logicTemplate string
 func genLogic(dir, rootPkg string, cfg *config.Config, api *spec.ApiSpec) error {
 	for _, g := range api.Service.Groups {
 		for _, r := range g.Routes {
+			// 新增：过滤掉 generation 为 "swagger" 的路由
+			if r.AtDoc.Generation == "swagger" {
+				//fmt.Println("genLogic: skip swagger route", r.Path)
+				continue
+			}
+
 			err := genLogicByRoute(dir, rootPkg, cfg, g, r)
 			if err != nil {
 				return err

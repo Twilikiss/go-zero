@@ -3,6 +3,7 @@ package swagger
 import (
 	"github.com/go-openapi/spec"
 	apiSpec "github.com/zeromicro/go-zero/tools/goctl/api/spec"
+	"strings"
 )
 
 func propertiesFromType(ctx Context, tp apiSpec.Type) (spec.SchemaProperties, []string) {
@@ -44,6 +45,25 @@ func propertiesFromType(ctx Context, tp apiSpec.Type) (spec.SchemaProperties, []
 				example = exampleValueFromOptions(ctx, jsonTag.Options, member.Type)
 				defaultValue = defValueFromOptions(ctx, jsonTag.Options, member.Type)
 				enum = enumsValueFromOptions(jsonTag.Options)
+
+				// 新增：检查json tag中的type=file
+				if isFileTypeInJsonTag(jsonTag) {
+					schema := spec.Schema{
+						SwaggerSchemaProps: spec.SwaggerSchemaProps{
+							Example: example,
+						},
+						SchemaProps: spec.SchemaProps{
+							Type:        []string{swaggerTypeString},
+							Format:      "binary", // 文件类型使用binary格式
+							Description: formatComment(member.Comment),
+						},
+					}
+					properties[jsonTagString] = schema
+					if required {
+						requiredFields = append(requiredFields, jsonTagString)
+					}
+					return // 文件类型处理完毕，直接返回
+				}
 			}
 
 			if required {
@@ -106,4 +126,17 @@ func containsStruct(tp apiSpec.Type) (string, bool) {
 
 func getRefName(typeName string) string {
 	return "#/definitions/" + typeName
+}
+
+// 新增：检查json tag中是否包含type=file
+func isFileTypeInJsonTag(jsonTag *apiSpec.Tag) bool {
+	for _, option := range jsonTag.Options {
+		if strings.HasPrefix(option, "type=") {
+			typeValue := strings.TrimPrefix(option, "type=")
+			if typeValue == "file" {
+				return true
+			}
+		}
+	}
+	return false
 }

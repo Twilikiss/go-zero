@@ -17,6 +17,11 @@ var logicTestTemplate string
 func genLogicTest(dir, rootPkg string, cfg *config.Config, api *spec.ApiSpec) error {
 	for _, g := range api.Service.Groups {
 		for _, r := range g.Routes {
+			// 新增：过滤掉 generation 为 "swagger" 的路由
+			if r.AtDoc.Generation == "swagger" {
+				continue
+			}
+
 			err := genLogicTestByRoute(dir, rootPkg, cfg, g, r)
 			if err != nil {
 				return err

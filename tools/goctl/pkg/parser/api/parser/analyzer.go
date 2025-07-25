@@ -161,15 +161,32 @@ func (a *Analyzer) convert2Spec() error {
 	return nil
 }
 
-func (a *Analyzer) convertAtDoc(atDoc ast.AtDocStmt) spec.AtDoc {
+func (a *Analyzer) convertAtDoc(atDoc ast.AtDocStmt) (spec.AtDoc, bool) {
 	var ret spec.AtDoc
+	var hasExplicitGeneration bool = false
+
 	switch val := atDoc.(type) {
 	case *ast.AtDocLiteralStmt:
 		ret.Text = val.Value.Token.Text
+		ret.Generation = "all" // 设置默认值
+		// hasExplicitGeneration 保持 false，因为字面量形式不包含generation
 	case *ast.AtDocGroupStmt:
 		ret.Properties = a.convertKV(val.Values)
+
+		// 添加调试信息
+		// fmt.Printf("DEBUG: convertAtDoc - Properties: %+v\n", ret.Properties)
+
+		// 解析generation属性
+		if gen, exists := ret.Properties["generation"]; exists {
+			ret.Generation = gen
+			hasExplicitGeneration = true // 🎯 标记：用户显式设置了generation
+			// fmt.Printf("DEBUG: convertAtDoc - Found explicit generation: %s\n", gen)
+		} else {
+			ret.Generation = "all" // 默认值
+			// fmt.Printf("DEBUG: convertAtDoc - No generation found, using default: all\n")
+		}
 	}
-	return ret
+	return ret, hasExplicitGeneration
 }
 
 func (a *Analyzer) convertKV(kv []*ast.KVExpr) map[string]string {
@@ -240,8 +257,16 @@ func (a *Analyzer) fillService() error {
 	var groups []spec.Group
 	for _, item := range a.api.ServiceStmts {
 		var group spec.Group
+		var serviceGeneration string = "all" // 服务级别的默认generation
+
 		if item.AtServerStmt != nil {
 			group.Annotation.Properties = a.convertKV(item.AtServerStmt.Values)
+
+			// 🎯 新增：从@server中提取generation设置
+			if gen, exists := group.Annotation.Properties["generation"]; exists {
+				serviceGeneration = gen
+				// fmt.Printf("DEBUG: Service level generation found: %s\n", gen)
+			}
 		}
 
 		for _, astRoute := range item.Routes {
@@ -252,11 +277,35 @@ func (a *Analyzer) fillService() error {
 				Doc:     head.List(),
 				Comment: leading.List(),
 			}
+
+			// 🎯 修改：使用 convertAtDoc 的返回值来判断是否显式设置
 			if astRoute.AtDoc != nil {
-				route.AtDoc = a.convertAtDoc(astRoute.AtDoc)
+				var hasExplicitGeneration bool
+				route.AtDoc, hasExplicitGeneration = a.convertAtDoc(astRoute.AtDoc)
+
+				// 只有在没有显式设置generation时，才继承服务级别的设置
+				if !hasExplicitGeneration && serviceGeneration != "all" {
+					route.AtDoc.Generation = serviceGeneration
+					// fmt.Printf("DEBUG: Route %s %s inherited service generation: %s\n",
+					// 	route.Method, route.Path, serviceGeneration)
+				} else if hasExplicitGeneration {
+					// fmt.Printf("DEBUG: Route %s %s uses explicit generation: %s\n",
+					// 	route.Method, route.Path, route.AtDoc.Generation)
+				} else {
+					// fmt.Printf("DEBUG: Route %s %s uses default generation: %s\n",
+					// 	route.Method, route.Path, route.AtDoc.Generation)
+				}
+			} else {
+				// 🎯 新增：如果没有@doc，创建一个默认的AtDoc并使用服务级别的generation
+				route.AtDoc = spec.AtDoc{
+					Properties: make(map[string]string),
+					Generation: serviceGeneration,
+				}
+				// fmt.Printf("DEBUG: Route %s %s created with service generation: %s\n",
+				// 	route.Method, route.Path, serviceGeneration)
 			}
+
 			if astRoute.AtHandler != nil {
-				route.AtDoc = a.convertAtDoc(astRoute.AtDoc)
 				route.Handler = astRoute.AtHandler.Name.Token.Text
 				head, leading := astRoute.AtHandler.CommentGroup()
 				route.HandlerDoc = head.List()

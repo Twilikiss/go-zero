@@ -136,13 +136,39 @@ func (api *API) checkServiceStmt() error {
 			prefix = api.getAtServerValue(v.AtServerStmt, atServerPrefixKey)
 			group  = api.getAtServerValue(v.AtServerStmt, atServerGroupKey)
 		)
+
+		// 🎯 新增：获取服务级别的 generation 设置
+		serviceGeneration := api.getAtServerGeneration(v.AtServerStmt)
+		if serviceGeneration == "" {
+			serviceGeneration = "all" // 默认值
+		}
+
+		// fmt.Printf("DEBUG: Processing service with generation: %s\n", serviceGeneration)
+
 		for _, item := range v.Routes {
-			handlerChecker.checkNodeWithPrefix(group, item.AtHandler.Name)
-			path := fmt.Sprintf("[%s]:%s", prefix, item.Route.Format(""))
+			// 🎯 修改：获取最终的 generation 设置，考虑继承逻辑
+			finalGeneration := api.getEffectiveGeneration(item.AtDoc, serviceGeneration)
+
+			// 临时调试信息
+			//fmt.Printf("DEBUG: Handler %s, Service Generation: %s, Final Generation: %s\n",
+			//	item.AtHandler.Name.Token.Text, serviceGeneration, finalGeneration)
+
+			// 只有非"swagger"的路由才检查handler重复
+			if finalGeneration != "swagger" {
+				//fmt.Printf("DEBUG: Checking handler %s (generation: %s)\n",
+				//	item.AtHandler.Name.Token.Text, finalGeneration)
+				handlerChecker.checkNodeWithPrefix(group, item.AtHandler.Name)
+			} else {
+				//fmt.Printf("DEBUG: Skipping handler %s (generation: swagger)\n",
+				//	item.AtHandler.Name.Token.Text)
+			}
+
+			// 路径检查包含generation信息，避免相同路径不同generation的冲突
+			pathWithGeneration := fmt.Sprintf("[%s]:%s#%s", prefix, item.Route.Format(""), finalGeneration)
 			pathChecker.check(
 				ast.NewTokenNode(
 					token.Token{
-						Text:     path,
+						Text:     pathWithGeneration,
 						Position: item.Route.Pos(),
 					},
 				),
@@ -349,4 +375,75 @@ func (api *API) SelfCheck() error {
 		return err
 	}
 	return api.checkTypeDeclareContext()
+}
+
+// getGenerationFromAtDoc 从AtDocStmt中提取generation值
+func (api *API) getGenerationFromAtDoc(atDoc ast.AtDocStmt) string {
+	if atDoc == nil {
+		return "all" // 默认值
+	}
+
+	switch val := atDoc.(type) {
+	case *ast.AtDocGroupStmt:
+		for _, kv := range val.Values {
+			if kv.Key.Token.Text == "generation" {
+				return strings.Trim(kv.Value.Token.Text, `"`)
+			}
+		}
+	case *ast.AtDocLiteralStmt:
+		// AtDocLiteralStmt 通常不包含键值对，所以返回默认值
+		return "all"
+	}
+
+	return "all" // 默认值
+}
+
+// getEffectiveGeneration 获取路由的有效 generation 设置，考虑从服务级别的继承
+func (api *API) getEffectiveGeneration(atDoc ast.AtDocStmt, serviceGeneration string) string {
+	// 检查路由级别是否有显式的 generation 设置
+	routeGeneration, hasExplicitGeneration := api.getExplicitGenerationFromAtDoc(atDoc)
+
+	if hasExplicitGeneration {
+		// 路由有显式设置，使用路由的设置
+		return routeGeneration
+	} else {
+		// 路由没有显式设置，使用服务级别的设置
+		return serviceGeneration
+	}
+}
+
+// getExplicitGenerationFromAtDoc 从AtDocStmt中提取generation值，并返回是否显式设置
+func (api *API) getExplicitGenerationFromAtDoc(atDoc ast.AtDocStmt) (string, bool) {
+	if atDoc == nil {
+		return "all", false // 没有@doc，没有显式设置
+	}
+
+	switch val := atDoc.(type) {
+	case *ast.AtDocGroupStmt:
+		for _, kv := range val.Values {
+			if kv.Key.Token.Text == "generation" {
+				return strings.Trim(kv.Value.Token.Text, `"`), true // 找到显式设置
+			}
+		}
+	case *ast.AtDocLiteralStmt:
+		// AtDocLiteralStmt 通常不包含键值对，没有显式设置
+		return "all", false
+	}
+
+	return "all", false // 没有找到generation设置，没有显式设置
+}
+
+// getAtServerGeneration 专门获取 generation 设置，确保去除引号
+func (api *API) getAtServerGeneration(atServer *ast.AtServerStmt) string {
+	if atServer == nil {
+		return "all"
+	}
+
+	for _, val := range atServer.Values {
+		if val.Key.Token.Text == "generation" {
+			return strings.Trim(val.Value.Token.Text, `"`)
+		}
+	}
+
+	return "all"
 }

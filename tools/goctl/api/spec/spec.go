@@ -1,7 +1,14 @@
 package spec
 
 // RoutePrefixKey is the prefix keyword for the routes.
-const RoutePrefixKey = "prefix"
+const (
+	// RoutePrefixKey is the prefix keyword for the routes.
+	RoutePrefixKey = "prefix"
+	// 新增：HTTP代码生成专用前缀
+	HttpPrefixKey = "http-prefix"
+	// 新增：Swagger生成专用前缀
+	SwaggerPrefixKey = "swagger-prefix"
+)
 
 type (
 	// Doc describes document
@@ -152,5 +159,7 @@ type (
 	AtDoc struct {
 		Properties map[string]string
 		Text       string
+		// 新增：生成控制
+		Generation string // "all", "http", "swagger"
 	}
 )

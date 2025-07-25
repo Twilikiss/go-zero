@@ -245,6 +245,11 @@ func getRoutes(api *spec.ApiSpec) ([]group, error) {
 	for _, g := range api.Service.Groups {
 		var groupedRoutes group
 		for _, r := range g.Routes {
+			// 新增：过滤掉 generation 为 "swagger" 的路由
+			if r.AtDoc.Generation == "swagger" {
+				continue
+			}
+
 			handler := getHandlerName(r)
 			handler = handler + "(serverCtx)"
 			folder := r.GetAnnotation(groupProperty)
@@ -262,6 +267,11 @@ func getRoutes(api *spec.ApiSpec) ([]group, error) {
 				handler: handler,
 				doc:     r.JoinedDoc(),
 			})
+		}
+
+		// 如果这个组没有任何路由，跳过它
+		if len(groupedRoutes.routes) == 0 {
+			continue
 		}
 
 		groupedRoutes.timeout = g.GetAnnotation("timeout")
@@ -286,8 +296,13 @@ func getRoutes(api *spec.ApiSpec) ([]group, error) {
 			groupedRoutes.middlewares = append(groupedRoutes.middlewares,
 				strings.Split(middleware, ",")...)
 		}
-		prefix := g.GetAnnotation(spec.RoutePrefixKey)
-		prefix = strings.ReplaceAll(prefix, `"`, "")
+		var prefix string
+		httpPrefix := g.GetAnnotation(spec.HttpPrefixKey)
+		if httpPrefix == "" {
+			// 如果没有设置http-prefix，则使用通用prefix
+			httpPrefix = g.GetAnnotation(spec.RoutePrefixKey)
+		}
+		prefix = strings.ReplaceAll(httpPrefix, `"`, "")
 		prefix = strings.TrimSpace(prefix)
 		if len(prefix) > 0 {
 			prefix = path.Join("/", prefix)

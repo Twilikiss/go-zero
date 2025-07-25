@@ -9,9 +9,19 @@ import (
 )
 
 func isPostJson(ctx Context, method string, tp apiSpec.Type) (string, bool) {
-	if !strings.EqualFold(method, http.MethodPost) {
+	//if !strings.EqualFold(method, http.MethodPost) {
+	//	return "", false
+	//}
+
+	// 【临时】支持所有应该有 request body 的方法（目前支持Post）
+	if !strings.EqualFold(method, http.MethodGet) &&
+		!strings.EqualFold(method, http.MethodPost) &&
+		!strings.EqualFold(method, http.MethodPut) &&
+		!strings.EqualFold(method, http.MethodPatch) &&
+		!strings.EqualFold(method, http.MethodDelete) {
 		return "", false
 	}
+
 	structType, ok := tp.(apiSpec.DefineStruct)
 	if !ok {
 		return "", false
@@ -24,6 +34,30 @@ func isPostJson(ctx Context, method string, tp apiSpec.Type) (string, bool) {
 		}
 	})
 	return structType.RawName, isPostJson
+}
+
+// 新增：检查是否是文件类型
+func isFileType(formTag *apiSpec.Tag, member apiSpec.Member) bool {
+	// 检查form tag的options中是否包含 type=file
+	for _, option := range formTag.Options {
+		if strings.HasPrefix(option, "type=") {
+			typeValue := strings.TrimPrefix(option, "type=")
+			if typeValue == "file" {
+				return true
+			}
+		}
+	}
+
+	// 检查是否是[]byte类型
+	if arrayType, ok := member.Type.(apiSpec.ArrayType); ok {
+		if primitiveType, ok := arrayType.Value.(apiSpec.PrimitiveType); ok {
+			if primitiveType.RawName == "byte" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Parameter {
@@ -54,7 +88,8 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 		hasJson := jsonTag != nil
 		if hasHeader {
 			minimum, maximum, exclusiveMinimum, exclusiveMaximum := rangeValueFromOptions(headerTag.Options)
-			resp = append(resp, spec.Parameter{
+			// 🎯 新增：为header参数添加example支持
+			headerParam := spec.Parameter{
 				CommonValidations: spec.CommonValidations{
 					Maximum:          maximum,
 					ExclusiveMaximum: exclusiveMaximum,
@@ -73,11 +108,23 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 					Description: formatComment(member.Comment),
 					Required:    required,
 				},
-			})
+			}
+
+			// 🎯 为header参数添加example
+			if example := exampleValueFromOptions(ctx, headerTag.Options, member.Type); example != nil {
+				// 使用VendorExtensible添加example
+				if headerParam.VendorExtensible.Extensions == nil {
+					headerParam.VendorExtensible.Extensions = make(map[string]interface{})
+				}
+				headerParam.VendorExtensible.Extensions["x-example"] = example
+			}
+
+			resp = append(resp, headerParam)
 		}
 		if hasPathParameter {
 			minimum, maximum, exclusiveMinimum, exclusiveMaximum := rangeValueFromOptions(pathParameterTag.Options)
-			resp = append(resp, spec.Parameter{
+			// 🎯 新增：为path参数添加example支持
+			pathParam := spec.Parameter{
 				CommonValidations: spec.CommonValidations{
 					Maximum:          maximum,
 					ExclusiveMaximum: exclusiveMaximum,
@@ -96,12 +143,24 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 					Description: formatComment(member.Comment),
 					Required:    required,
 				},
-			})
+			}
+
+			// 🎯 为path参数添加example
+			if example := exampleValueFromOptions(ctx, pathParameterTag.Options, member.Type); example != nil {
+				// 使用VendorExtensible添加example
+				if pathParam.VendorExtensible.Extensions == nil {
+					pathParam.VendorExtensible.Extensions = make(map[string]interface{})
+				}
+				pathParam.VendorExtensible.Extensions["x-example"] = example
+			}
+
+			resp = append(resp, pathParam)
 		}
 		if hasForm {
 			minimum, maximum, exclusiveMinimum, exclusiveMaximum := rangeValueFromOptions(formTag.Options)
 			if strings.EqualFold(method, http.MethodGet) {
-				resp = append(resp, spec.Parameter{
+				// 🎯 GET方法的form参数（作为query参数）
+				queryParam := spec.Parameter{
 					CommonValidations: spec.CommonValidations{
 						Maximum:          maximum,
 						ExclusiveMaximum: exclusiveMaximum,
@@ -121,29 +180,88 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 						Required:        required,
 						AllowEmptyValue: !required,
 					},
-				})
+				}
+
+				// 🎯 为query参数添加example
+				if example := exampleValueFromOptions(ctx, formTag.Options, member.Type); example != nil {
+					// 使用VendorExtensible添加example
+					if queryParam.VendorExtensible.Extensions == nil {
+						queryParam.VendorExtensible.Extensions = make(map[string]interface{})
+					}
+					queryParam.VendorExtensible.Extensions["x-example"] = example
+				}
+
+				resp = append(resp, queryParam)
 			} else {
-				resp = append(resp, spec.Parameter{
-					CommonValidations: spec.CommonValidations{
-						Maximum:          maximum,
-						ExclusiveMaximum: exclusiveMaximum,
-						Minimum:          minimum,
-						ExclusiveMinimum: exclusiveMinimum,
-						Enum:             enumsValueFromOptions(formTag.Options),
-					},
-					SimpleSchema: spec.SimpleSchema{
-						Type:    sampleTypeFromGoType(ctx, member.Type),
-						Default: defValueFromOptions(ctx, formTag.Options, member.Type),
-						Items:   sampleItemsFromGoType(ctx, member.Type),
-					},
-					ParamProps: spec.ParamProps{
-						In:              paramsInForm,
-						Name:            formTag.Name,
-						Description:     formatComment(member.Comment),
-						Required:        required,
-						AllowEmptyValue: !required,
-					},
-				})
+				// POST等方法的form参数
+				// 检查是否是文件类型
+				if isFileType(formTag, member) {
+					// 处理文件类型参数
+					fileParam := spec.Parameter{
+						CommonValidations: spec.CommonValidations{
+							Maximum:          maximum,
+							ExclusiveMaximum: exclusiveMaximum,
+							Minimum:          minimum,
+							ExclusiveMinimum: exclusiveMinimum,
+							Enum:             enumsValueFromOptions(formTag.Options),
+						},
+						SimpleSchema: spec.SimpleSchema{
+							Type:   "file",
+							Format: "binary",
+						},
+						ParamProps: spec.ParamProps{
+							In:              paramsInForm,
+							Name:            formTag.Name,
+							Description:     formatComment(member.Comment),
+							Required:        required,
+							AllowEmptyValue: !required,
+						},
+					}
+
+					// 🎯 文件类型通常不需要example，但如果有的话也添加
+					if example := exampleValueFromOptions(ctx, formTag.Options, member.Type); example != nil {
+						if fileParam.VendorExtensible.Extensions == nil {
+							fileParam.VendorExtensible.Extensions = make(map[string]interface{})
+						}
+						fileParam.VendorExtensible.Extensions["x-example"] = example
+					}
+
+					resp = append(resp, fileParam)
+				} else {
+					// 处理普通form参数
+					formParam := spec.Parameter{
+						CommonValidations: spec.CommonValidations{
+							Maximum:          maximum,
+							ExclusiveMaximum: exclusiveMaximum,
+							Minimum:          minimum,
+							ExclusiveMinimum: exclusiveMinimum,
+							Enum:             enumsValueFromOptions(formTag.Options),
+						},
+						SimpleSchema: spec.SimpleSchema{
+							Type:    sampleTypeFromGoType(ctx, member.Type),
+							Default: defValueFromOptions(ctx, formTag.Options, member.Type),
+							Items:   sampleItemsFromGoType(ctx, member.Type),
+						},
+						ParamProps: spec.ParamProps{
+							In:              paramsInForm,
+							Name:            formTag.Name,
+							Description:     formatComment(member.Comment),
+							Required:        required,
+							AllowEmptyValue: !required,
+						},
+					}
+
+					// 🎯 为form参数添加example
+					if example := exampleValueFromOptions(ctx, formTag.Options, member.Type); example != nil {
+						// 使用VendorExtensible添加example
+						if formParam.VendorExtensible.Extensions == nil {
+							formParam.VendorExtensible.Extensions = make(map[string]interface{})
+						}
+						formParam.VendorExtensible.Extensions["x-example"] = example
+					}
+
+					resp = append(resp, formParam)
+				}
 			}
 
 		}
@@ -179,11 +297,13 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 			properties[jsonTag.Name] = schema
 		}
 	})
+
+	// 处理JSON请求体
 	if len(properties) > 0 {
 		if ctx.UseDefinitions {
 			structName, ok := isPostJson(ctx, method, tp)
 			if ok {
-				resp = append(resp, spec.Parameter{
+				bodyParam := spec.Parameter{
 					ParamProps: spec.ParamProps{
 						In:       paramsInBody,
 						Name:     paramsInBody,
@@ -194,10 +314,11 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 							},
 						},
 					},
-				})
+				}
+				resp = append(resp, bodyParam)
 			}
 		} else {
-			resp = append(resp, spec.Parameter{
+			bodyParam := spec.Parameter{
 				ParamProps: spec.ParamProps{
 					In:       paramsInBody,
 					Name:     paramsInBody,
@@ -210,7 +331,8 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 						},
 					},
 				},
-			})
+			}
+			resp = append(resp, bodyParam)
 		}
 	}
 	return resp

@@ -15,8 +15,23 @@ func spec2Paths(ctx Context, srv apiSpec.Service) *spec.Paths {
 		Paths: make(map[string]spec.PathItem),
 	}
 	for _, group := range srv.Groups {
-		prefix := path.Clean(strings.TrimPrefix(group.GetAnnotation(propertyKeyPrefix), "/"))
+		swaggerPrefix := group.GetAnnotation("swagger-prefix")
+		if swaggerPrefix == "" {
+			swaggerPrefix = group.GetAnnotation(propertyKeyPrefix)
+		}
+		prefix := path.Clean(strings.TrimPrefix(swaggerPrefix, "/"))
 		for _, route := range group.Routes {
+			// 调试信息
+			//fmt.Printf("Processing route: %s %s, generation: '%s'\n",
+			//	route.Method, route.Path, route.AtDoc.Generation)
+
+			// 过滤掉generation为"http"的路由
+			if route.AtDoc.Generation == "http" {
+				//fmt.Printf("FILTERED: Skipping route %s %s (generation: http)\n",
+				//	route.Method, route.Path)
+				continue
+			}
+
 			routPath := pathVariable2SwaggerVariable(ctx, route.Path)
 			if len(prefix) > 0 && prefix != "." {
 				routPath = "/" + path.Clean(prefix) + routPath

@@ -10,6 +10,7 @@ const (
 	rangeFlag    = "range="
 	exampleFlag  = "example="
 	optionalFlag = "optional"
+	typeFlag     = "type=" // 新增：类型标志
 
 	paramsInHeader = "header"
 	paramsInPath   = "path"
@@ -23,10 +24,12 @@ const (
 	swaggerTypeBoolean = "boolean"
 	swaggerTypeArray   = "array"
 	swaggerTypeObject  = "object"
+	swaggerTypeFile    = "file" // 新增：文件类型
 
 	swaggerVersion  = "2.0"
 	applicationJson = "application/json"
 	applicationForm = "application/x-www-form-urlencoded"
+	multipartForm   = "multipart/form-data" // 新增：多部分表单类型
 	schemeHttps     = "https"
 	defaultBasePath = "/"
 )
