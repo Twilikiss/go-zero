@@ -123,6 +123,11 @@ func (api *API) checkServiceStmt() error {
 	handlerChecker := f.addCheckItem(api.Filename, "handler expression")
 	pathChecker := f.addCheckItem(api.Filename, "path expression")
 	var serviceName = map[string]string{}
+
+	// 用于存储handler和path的generation信息
+	handlerGenerations := make(map[string][]string) // handler -> []generation
+	pathGenerations := make(map[string][]string)    // path -> []generation
+
 	for _, v := range api.ServiceStmts {
 		name := strings.TrimSuffix(v.Name.Format(""), "-api")
 		if sn, ok := serviceName[name]; ok {
@@ -137,45 +142,107 @@ func (api *API) checkServiceStmt() error {
 			group  = api.getAtServerValue(v.AtServerStmt, atServerGroupKey)
 		)
 
-		// 🎯 新增：获取服务级别的 generation 设置
+		// 获取服务级别的 generation 设置
 		serviceGeneration := api.getAtServerGeneration(v.AtServerStmt)
 		if serviceGeneration == "" {
 			serviceGeneration = "all" // 默认值
 		}
 
-		// fmt.Printf("DEBUG: Processing service with generation: %s\n", serviceGeneration)
-
 		for _, item := range v.Routes {
-			// 🎯 修改：获取最终的 generation 设置，考虑继承逻辑
+			// 获取最终的 generation 设置，考虑继承逻辑
 			finalGeneration := api.getEffectiveGeneration(item.AtDoc, serviceGeneration)
 
-			// 临时调试信息
-			//fmt.Printf("DEBUG: Handler %s, Service Generation: %s, Final Generation: %s\n",
-			//	item.AtHandler.Name.Token.Text, serviceGeneration, finalGeneration)
-
-			// 只有非"swagger"的路由才检查handler重复
-			if finalGeneration != "swagger" {
-				//fmt.Printf("DEBUG: Checking handler %s (generation: %s)\n",
-				//	item.AtHandler.Name.Token.Text, finalGeneration)
-				handlerChecker.checkNodeWithPrefix(group, item.AtHandler.Name)
-			} else {
-				//fmt.Printf("DEBUG: Skipping handler %s (generation: swagger)\n",
-				//	item.AtHandler.Name.Token.Text)
+			// 构建handler和path的唯一标识
+			handlerKey := item.AtHandler.Name.Token.Text
+			if len(group) > 0 {
+				handlerKey = fmt.Sprintf("%s/%s", group, handlerKey)
 			}
 
-			// 路径检查包含generation信息，避免相同路径不同generation的冲突
-			pathWithGeneration := fmt.Sprintf("[%s]:%s#%s", prefix, item.Route.Format(""), finalGeneration)
-			pathChecker.check(
-				ast.NewTokenNode(
-					token.Token{
-						Text:     pathWithGeneration,
-						Position: item.Route.Pos(),
-					},
-				),
-			)
+			pathKey := fmt.Sprintf("[%s]:%s", prefix, item.Route.Format(""))
+
+			// 检查handler重复
+			if generations, exists := handlerGenerations[handlerKey]; exists {
+				// 检查是否有冲突的generation
+				if api.hasConflictingGenerations(generations, finalGeneration) {
+					handlerChecker.errorManager.add(ast.DuplicateStmtError(
+						item.AtHandler.Name.Pos(),
+						fmt.Sprintf("duplicate handler '%s' with conflicting generation", handlerKey),
+					))
+				}
+			} else {
+				handlerGenerations[handlerKey] = []string{finalGeneration}
+			}
+
+			// 检查path重复
+			if generations, exists := pathGenerations[pathKey]; exists {
+				// 检查是否有冲突的generation
+				if api.hasConflictingGenerations(generations, finalGeneration) {
+					pathChecker.errorManager.add(ast.DuplicateStmtError(
+						item.Route.Pos(),
+						fmt.Sprintf("duplicate path '%s' with conflicting generation", pathKey),
+					))
+				}
+			} else {
+				pathGenerations[pathKey] = []string{finalGeneration}
+			}
+
+			// 将generation添加到对应的列表中
+			if !api.containsGeneration(handlerGenerations[handlerKey], finalGeneration) {
+				handlerGenerations[handlerKey] = append(handlerGenerations[handlerKey], finalGeneration)
+			}
+			if !api.containsGeneration(pathGenerations[pathKey], finalGeneration) {
+				pathGenerations[pathKey] = append(pathGenerations[pathKey], finalGeneration)
+			}
 		}
 	}
 	return f.error()
+}
+
+// hasConflictingGenerations 检查两个generation是否冲突
+func (api *API) hasConflictingGenerations(existingGenerations []string, newGeneration string) bool {
+	for _, existing := range existingGenerations {
+		if api.generationsConflict(existing, newGeneration) {
+			return true
+		}
+	}
+	return false
+}
+
+// generationsConflict 检查两个generation是否冲突
+// 冲突规则：
+// - http 和 http 冲突
+// - http 和 all 冲突
+// - swagger 和 swagger 冲突
+// - swagger 和 all 冲突
+// - all 和 all 冲突
+func (api *API) generationsConflict(gen1, gen2 string) bool {
+	// 如果两个generation相同，则冲突
+	if gen1 == gen2 {
+		return true
+	}
+
+	// 如果其中一个或两个都是"all"，则冲突
+	if gen1 == "all" || gen2 == "all" {
+		return true
+	}
+
+	// 如果两个都是"http"或两个都是"swagger"，则冲突
+	if (gen1 == "http" && gen2 == "http") || (gen1 == "swagger" && gen2 == "swagger") {
+		return true
+	}
+
+	// 其他情况（如http和swagger）不冲突
+	return false
+}
+
+// containsGeneration 检查generation列表中是否包含指定的generation
+func (api *API) containsGeneration(generations []string, generation string) bool {
+	for _, g := range generations {
+		if g == generation {
+			return true
+		}
+	}
+	return false
 }
 
 func (api *API) checkTypeStmt() error {
