@@ -269,6 +269,7 @@ func (a *Analyzer) fillService() error {
 			}
 		}
 
+		sse := group.GetAnnotation("sse") == "true"
 		for _, astRoute := range item.Routes {
 			head, leading := astRoute.CommentGroup()
 			route := spec.Route{
@@ -325,6 +326,13 @@ func (a *Analyzer) fillService() error {
 					return err
 				}
 				route.ResponseType = responseType
+			}
+			if route.ResponseType == nil && sse {
+				if route.RequestType != nil {
+					return ast.SyntaxError(astRoute.Route.Request.Pos(), "missing response type")
+				} else {
+					return ast.SyntaxError(astRoute.Route.Path.Pos(), "missing response type")
+				}
 			}
 
 			if err := a.fillRouteType(&route); err != nil {
