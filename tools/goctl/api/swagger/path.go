@@ -15,7 +15,7 @@ func spec2Paths(ctx Context, srv apiSpec.Service) *spec.Paths {
 		Paths: make(map[string]spec.PathItem),
 	}
 	for _, group := range srv.Groups {
-		swaggerPrefix := group.GetAnnotation("swagger-prefix")
+		swaggerPrefix := group.GetAnnotation(apiSpec.SwaggerPrefixKey)
 		if swaggerPrefix == "" {
 			swaggerPrefix = group.GetAnnotation(propertyKeyPrefix)
 		}

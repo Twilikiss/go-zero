@@ -288,7 +288,24 @@ func parametersFromType(ctx Context, method string, tp apiSpec.Type) []spec.Para
 			}
 			switch sampleTypeFromGoType(ctx, member.Type) {
 			case swaggerTypeArray:
-				schema.Items = itemsFromGoType(ctx, member.Type)
+				// 检查数组元素类型
+				if arrayType, ok := member.Type.(apiSpec.ArrayType); ok {
+					if defineType, ok := arrayType.Value.(apiSpec.DefineStruct); ok && ctx.UseDefinitions {
+						// 如果是定义结构体且UseDefinitions=true，使用$ref引用
+						schema.Items = &spec.SchemaOrArray{
+							Schema: &spec.Schema{
+								SchemaProps: spec.SchemaProps{
+									Ref: spec.MustCreateRef("#/definitions/" + defineType.RawName),
+								},
+							},
+						}
+					} else {
+						// 否则使用普通的itemsFromGoType
+						schema.Items = itemsFromGoType(ctx, member.Type)
+					}
+				} else {
+					schema.Items = itemsFromGoType(ctx, member.Type)
+				}
 			case swaggerTypeObject:
 				p, r := propertiesFromType(ctx, member.Type)
 				schema.Properties = p

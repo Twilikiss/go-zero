@@ -69,6 +69,12 @@ func sampleItemsFromGoType(ctx Context, tp apiSpec.Type) *spec.Items {
 
 // itemsFromGoType returns the schema or array of the type, just for non json body parameters.
 func itemsFromGoType(ctx Context, tp apiSpec.Type) *spec.SchemaOrArray {
+	// 首先尝试获取引用
+	if ref := getRefForArrayItem(ctx, tp); ref != nil {
+		return ref
+	}
+
+	// 原有逻辑
 	array, ok := tp.(apiSpec.ArrayType)
 	if !ok {
 		return nil
@@ -112,7 +118,31 @@ func itemFromGoType(ctx Context, tp apiSpec.Type) *spec.SchemaOrArray {
 				},
 			},
 		}
-	case apiSpec.DefineStruct, apiSpec.NestedStruct, apiSpec.MapType:
+	case apiSpec.DefineStruct:
+		// 当UseDefinitions=true时，对于定义结构体使用$ref引用
+		if ctx.UseDefinitions {
+			return &spec.SchemaOrArray{
+				Schema: &spec.Schema{
+					SchemaProps: spec.SchemaProps{
+						Ref: spec.MustCreateRef("#/definitions/" + itemType.RawName),
+					},
+				},
+			}
+		}
+		// 否则使用内联定义
+		properties, requiredFields := propertiesFromType(ctx, itemType)
+		return &spec.SchemaOrArray{
+			Schema: &spec.Schema{
+				SchemaProps: spec.SchemaProps{
+					Type:                 typeFromGoType(ctx, itemType),
+					Items:                itemsFromGoType(ctx, itemType),
+					Properties:           properties,
+					Required:             requiredFields,
+					AdditionalProperties: mapFromGoType(ctx, itemType),
+				},
+			},
+		}
+	case apiSpec.NestedStruct, apiSpec.MapType:
 		properties, requiredFields := propertiesFromType(ctx, itemType)
 		return &spec.SchemaOrArray{
 			Schema: &spec.Schema{
@@ -318,4 +348,44 @@ func specExtensions(api apiSpec.Info) (spec.Extensions, *spec.Info) {
 		info.License = license
 	}
 	return ext, info
+}
+
+// getRefForArrayItem 返回数组项的引用（如果适用）
+func getRefForArrayItem(ctx Context, tp apiSpec.Type) *spec.SchemaOrArray {
+	// 如果不使用定义或不是数组类型，返回nil
+	if !ctx.UseDefinitions {
+		return nil
+	}
+
+	arrayType, ok := tp.(apiSpec.ArrayType)
+	if !ok {
+		return nil
+	}
+
+	// 检查数组元素是否为定义结构体
+	switch itemType := arrayType.Value.(type) {
+	case apiSpec.DefineStruct:
+		// 返回引用
+		return &spec.SchemaOrArray{
+			Schema: &spec.Schema{
+				SchemaProps: spec.SchemaProps{
+					Ref: spec.MustCreateRef("#/definitions/" + itemType.RawName),
+				},
+			},
+		}
+	case apiSpec.PointerType:
+		// 处理指针类型
+		if defineType, ok := itemType.Type.(apiSpec.DefineStruct); ok {
+			return &spec.SchemaOrArray{
+				Schema: &spec.Schema{
+					SchemaProps: spec.SchemaProps{
+						Ref: spec.MustCreateRef("#/definitions/" + defineType.RawName),
+					},
+				},
+			}
+		}
+	}
+
+	// 不是引用类型，返回nil
+	return nil
 }

@@ -312,7 +312,7 @@ func getRoutes(api *spec.ApiSpec) ([]group, error) {
 		var prefix string
 		httpPrefix := g.GetAnnotation(spec.HttpPrefixKey)
 		if httpPrefix == "" {
-			// 如果没有设置http-prefix，则使用通用prefix
+			// 如果没有设置http_prefix，则使用通用prefix
 			httpPrefix = g.GetAnnotation(spec.RoutePrefixKey)
 		}
 		prefix = strings.ReplaceAll(httpPrefix, `"`, "")

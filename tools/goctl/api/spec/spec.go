@@ -5,9 +5,9 @@ const (
 	// RoutePrefixKey is the prefix keyword for the routes.
 	RoutePrefixKey = "prefix"
 	// 新增：HTTP代码生成专用前缀
-	HttpPrefixKey = "http-prefix"
+	HttpPrefixKey = "http_prefix"
 	// 新增：Swagger生成专用前缀
-	SwaggerPrefixKey = "swagger-prefix"
+	SwaggerPrefixKey = "swagger_prefix"
 )
 
 type (
