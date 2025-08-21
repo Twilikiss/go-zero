@@ -67,14 +67,14 @@ func genHandler(dir, rootPkg string, cfg *config.Config, group spec.Group, route
 	})
 }
 
-func genHandlers(dir, rootPkg string, cfg *config.Config, api *spec.ApiSpec) error {
+func genHandlers(dir, rootPkg, projectPkg string, cfg *config.Config, api *spec.ApiSpec) error {
 	for _, group := range api.Service.Groups {
 		for _, route := range group.Routes {
 			if route.AtDoc.Generation == "swagger" {
 				//fmt.Println("genHandler: skip swagger route", route.Path)
 				continue
 			}
-			if err := genHandler(dir, rootPkg, cfg, group, route); err != nil {
+			if err := genHandler(dir, rootPkg, projectPkg, cfg, group, route); err != nil {
 				return err
 			}
 		}
